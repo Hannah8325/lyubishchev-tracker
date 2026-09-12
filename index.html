@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>柳比歇夫时间账本 · Lyubishchev Tracker</title>
+<style>
+  :root{
+    --bg:#f6f4ef; --card:#ffffff; --ink:#1f2430; --sub:#8a8f9c; --line:#e8e4da;
+    --accent:#4f6df5; --accent-soft:#eef1fe; --danger:#e5484d;
+    --shadow:0 6px 24px rgba(31,36,48,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--bg);color:var(--ink);min-height:100vh}
+  .topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:18px;
+          padding:12px 24px;background:rgba(255,255,255,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .logo{font-size:17px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
+  .logo em{font-style:normal;color:var(--accent)}
+  .tabs{display:flex;gap:4px;background:var(--bg);border-radius:10px;padding:4px;flex:1}
+  .tabs button{border:0;background:transparent;padding:7px 16px;border-radius:8px;font-size:14px;
+               color:var(--sub);cursor:pointer;transition:.15s}
+  .tabs button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  .date-label{font-size:13px;color:var(--sub);white-space:nowrap}
+  main{max-width:1080px;margin:0 auto;padding:24px 24px 120px}
+  section.tab{display:none}
+  section.tab.on{display:block}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px}
+  .card h3{font-size:15px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  .muted{color:var(--sub);font-size:13px}
+
+  /* ---- 今日概览条 ---- */
+  .strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 18px;box-shadow:var(--shadow)}
+  .stat .v{font-size:24px;font-weight:700;margin-top:4px}
+  .stat .k{font-size:12px;color:var(--sub)}
+  .stat .v small{font-size:13px;color:var(--sub);font-weight:400}
+
+  /* ---- 时间轴 ---- */
+  .timeline-wrap{display:flex;gap:0;position:relative}
+  .hours{width:56px;flex:none;position:relative}
+  .hours div{height:40px;font-size:11px;color:var(--sub);text-align:right;padding-right:10px;
+             transform:translateY(-6px);user-select:none}
+  .lane{flex:1;position:relative;border-left:1px solid var(--line);border-right:1px solid var(--line);
+        background:repeating-linear-gradient(to bottom,transparent 0 39px,var(--line) 39px 40px)}
+  .ev{position:absolute;left:6px;right:10px;border-radius:8px;padding:4px 10px;overflow:hidden;cursor:default;
+      border-left:4px solid;transition:filter .15s}
+  .ev:hover{filter:brightness(1.05)}
+  .ev .n{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ev .d{font-size:11px;opacity:.75}
+  .nowline{position:absolute;left:0;right:0;height:2px;background:var(--danger);z-index:5;pointer-events:none}
+  .nowline::before{content:"";position:absolute;left:-5px;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--danger)}
+  .empty-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+              color:var(--sub);font-size:13px;pointer-events:none}
+
+  /* ---- 统计页 ---- */
+  .ctrl{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+  .ctrl .seg{display:flex;background:var(--bg);border-radius:9px;padding:3px}
+  .ctrl .seg button{border:0;background:transparent;padding:6px 14px;border-radius:7px;font-size:13px;color:var(--sub);cursor:pointer}
+  .ctrl .seg button.on{background:#fff;font-weight:600;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+  .ctrl button.nav{border:1px solid var(--line);background:#fff;border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:14px}
+  .ctrl .pr{font-size:14px;font-weight:600;min-width:170px;text-align:center}
+  .piegrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.piegrid{grid-template-columns:1fr}}
+  .piebox canvas{display:block;margin:6px auto}
+  .legend{margin-top:8px}
+  .legend .row{display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 2px;border-bottom:1px dashed var(--line)}
+  .legend .row:last-child{border-bottom:0}
+  .dot{width:10px;height:10px;border-radius:3px;flex:none}
+  .legend .nm{flex:1}
+  .legend .pc{color:var(--sub);width:52px;text-align:right}
+  .insights{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .insight{background:var(--accent-soft);border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.6}
+  .insight b{font-size:16px}
+
+  /* ---- 类别管理 ---- */
+  .catrow{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px dashed var(--line)}
+  .catrow input[type=color]{width:34px;height:28px;border:0;background:none;cursor:pointer;padding:0}
+  .catrow input.txt{flex:1;border:1px solid transparent;background:transparent;font-size:14px;padding:6px 8px;border-radius:8px;color:var(--ink)}
+  .catrow input.txt:focus{outline:none;border-color:var(--accent);background:#fff}
+  .catrow .hrs{font-size:12px;color:var(--sub);width:86px;text-align:right}
+  .catrow .del{border:0;background:none;color:var(--sub);cursor:pointer;font-size:15px;padding:4px 8px;border-radius:6px}
+  .catrow .del:hover{color:var(--danger);background:#fdecec}
+  .addrow{display:flex;gap:10px;margin-top:14px}
+  .addrow input{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:14px}
+  .btn{border:0;background:var(--accent);color:#fff;border-radius:9px;padding:9px 18px;font-size:14px;cursor:pointer}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  .btn.sm{padding:6px 12px;font-size:13px}
+
+  /* ---- 导出页 ---- */
+  .export-actions{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  pre.md{background:#23272f;color:#d7dae0;border-radius:12px;padding:18px;font-size:13px;line-height:1.7;
+         overflow:auto;max-height:420px;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap}
+
+  /* ---- 悬浮窗 ---- */
+  #widget{position:fixed;right:26px;bottom:26px;z-index:999;width:272px;background:#1f2430;color:#fff;
+          border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.35);overflow:hidden;user-select:none}
+  #widget .wh{display:flex;align-items:center;gap:8px;padding:9px 14px;background:#2a3040;cursor:move;font-size:12px;color:#aab}
+  #widget .wh .live{width:8px;height:8px;border-radius:50%;background:#3a4152}
+  #widget .wh.running .live{background:#22c55e;box-shadow:0 0 8px #22c55e;animation:blink 1.6s infinite}
+  @keyframes blink{50%{opacity:.4}}
+  #widget .wh .tt{flex:1}
+  #widget .wh .min{cursor:pointer;color:#889;border:0;background:none;font-size:14px}
+  #widget .wb{padding:12px 14px}
+  #widget input.wi{width:100%;background:#2a3040;border:1px solid #3a4152;color:#fff;border-radius:9px;
+                   padding:9px 12px;font-size:14px;outline:none}
+  #widget input.wi:focus{border-color:var(--accent)}
+  #widget .wrow{display:flex;gap:8px;margin-top:10px;align-items:center}
+  #widget .btnw{flex:1;border:0;border-radius:9px;padding:9px 0;font-size:14px;cursor:pointer;font-weight:600}
+  #widget .start{background:var(--accent);color:#fff}
+  #widget .stop{background:#e5484d;color:#fff}
+  #widget .wtime{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;margin:6px 0 2px}
+  #widget .wname{font-size:12px;color:#9aa;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #widget .wfoot{font-size:11px;color:#788;text-align:center;margin-top:8px}
+
+  /* ---- 类别弹窗 ---- */
+  #mask,#helpMask,#retroMask{position:fixed;inset:0;background:rgba(20,22,30,.45);z-index:1000;display:none;align-items:center;justify-content:center}
+  #mask.on,#helpMask.on,#retroMask.on{display:flex}
+  .rti{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:14px;margin-bottom:10px;color:var(--ink)}
+  .rtr{display:flex;gap:6px;align-items:center;margin-bottom:10px}
+  .rtr input{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:7px 6px;font-size:12px;color:var(--ink)}
+  .rtr label{font-size:12px;color:var(--sub);white-space:nowrap}
+  #rtCats{margin-bottom:4px}
+  #rtCats button.sel{border-color:var(--accent);background:var(--accent-soft);font-weight:600}
+  .aiout{background:#f8f7f3;border:1px dashed var(--line);border-radius:10px;padding:14px 16px;font-size:13px;line-height:1.9;white-space:pre-wrap;min-height:70px;color:var(--ink)}
+  .modal{background:#fff;border-radius:16px;padding:22px;width:340px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal h4{font-size:15px;margin-bottom:4px}
+  .modal .sub{font-size:12px;color:var(--sub);margin-bottom:14px}
+  .catgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .catgrid button{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:#fff;border-radius:9px;
+                  padding:9px 10px;font-size:13px;cursor:pointer}
+  .catgrid button:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);background:#1f2430;color:#fff;
+         padding:9px 18px;border-radius:10px;font-size:13px;z-index:1200;opacity:0;transition:.25s;pointer-events:none}
+  .toast.on{opacity:1}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">⏱ 柳比歇夫<em>时间账本</em></div>
+  <nav class="tabs">
+    <button class="on" data-tab="timeline">📅 今日时间轴</button>
+    <button data-tab="stats">📊 统计优化</button>
+    <button data-tab="cats">🏷 时间类别</button>
+    <button data-tab="export">📤 导出 / Obsidian</button>
+  </nav>
+  <div class="date-label" id="dateLabel"></div>
+  <button class="btn sm ghost" id="helpBtn" title="这是什么？怎么用？">？使用说明</button>
+</header>
+
+<!-- 使用说明弹窗（完整版见独立的《用户说明书.md》） -->
+<div id="helpMask">
+  <div class="modal" style="width:430px">
+    <h4>⏱ 柳比歇夫时间账本 —— 三分钟上手</h4>
+    <div class="sub">柳比歇夫用 56 年记录时间，一生完成 70 余部著作。这个工具把他的方法软件化：<b>记录 → 统计 → 分析 → 反馈</b>。</div>
+    <div style="font-size:13px;line-height:2">
+      ① 右下角<b>悬浮窗</b>输入正在做的事，回车 → 自动计时<br>
+      ② 做完点 <b>■ 结束并分类</b> → 选一个时间类别 → 归档完成<br>
+      ③ 📅 <b>今日时间轴</b>：像课程表一样回看一天的时间去向<br>
+      ④ 📊 <b>统计优化</b>：周/月分类饼图 + 洞察建议，找到时间黑洞<br>
+      ⑤ 🏷 <b>时间类别</b>：按自己的科目表自定义类别（睡眠也要记）<br>
+      ⑥ 📤 <b>导出</b>：Markdown 贴进 Obsidian，或 .json 供 Obsidian 插件读取/写回
+    </div>
+    <div class="sub" style="margin-top:12px">完整说明书见项目文件《用户说明书.md》。当前为网页 Demo，数据只存在本机浏览器。</div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="document.getElementById('helpMask').classList.remove('on')">开始记录 →</button>
+  </div>
+</div>
+
+<main>
+  <!-- 今日时间轴 -->
+  <section class="tab on" id="tab-timeline">
+    <div class="strip" id="dayStrip"></div>
+    <div class="card">
+      <h3>一天的时间去向 <span class="muted" id="laneHint"></span></h3>
+      <div class="timeline-wrap" id="tlWrap"></div>
+    </div>
+  </section>
+
+  <!-- 统计 -->
+  <section class="tab" id="tab-stats">
+    <div class="card">
+      <div class="ctrl">
+        <div class="seg">
+          <button class="on" data-p="week">本周</button>
+          <button data-p="month">本月</button>
+        </div>
+        <button class="nav" id="prevP">‹</button>
+        <div class="pr" id="prLabel"></div>
+        <button class="nav" id="nextP">›</button>
+      </div>
+      <div class="piegrid">
+        <div class="piebox"><h3 style="font-size:14px">按类别占比</h3><canvas id="pieA" width="300" height="220"></canvas><div class="legend" id="legA"></div></div>
+        <div class="piebox"><h3 style="font-size:14px">投入时长排行</h3><canvas id="pieB" width="300" height="220"></canvas><div class="legend" id="legB"></div></div>
+      </div>
+      <div class="insights" id="insights"></div>
+      <div class="card" style="margin-top:16px;box-shadow:none" id="aiCard">
+        <h3>✨ AI 复盘教练</h3>
+        <div class="ctrl">
+          <input id="aiKey" placeholder="Moonshot API Key（可选；不填则使用本地规则版复盘）" style="flex:1;min-width:220px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px">
+          <button class="btn sm" id="aiGo">生成复盘</button>
+        </div>
+        <div id="aiOut" class="aiout">点「生成复盘」，AI 会基于当前周期的统计数据输出：📊 概况 · ✨ 亮点 · 🕳 时间黑洞 · 🎯 下周可执行建议。生成后还可以继续追问。</div>
+        <div id="aiFollowRow" style="display:none;gap:8px;margin-top:10px">
+          <input id="aiQ" placeholder="追问，如：为什么我这周深度工作变少了？" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px">
+          <button class="btn sm" id="aiAsk">问</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 类别 -->
+  <section class="tab" id="tab-cats">
+    <div class="card">
+      <h3>时间类别 <span class="muted">结束事件时选择，统计全部按类别归集</span></h3>
+      <div id="catList"></div>
+      <div class="addrow">
+        <input id="newCatName" placeholder="新类别名称，如：写作 / 通勤 / 陪伴家人">
+        <input type="color" id="newCatColor" value="#14b8a6" style="width:44px;height:38px;border:0;background:none;cursor:pointer">
+        <button class="btn" id="addCatBtn">＋ 添加类别</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 导出 -->
+  <section class="tab" id="tab-export">
+    <div class="card">
+      <h3>导出时间日志</h3>
+      <div class="export-actions">
+        <button class="btn sm" id="expCopy">📋 复制 Markdown</button>
+        <button class="btn sm ghost" id="expMd">⬇ 下载 .md（贴进 Obsidian 日记）</button>
+        <button class="btn sm ghost" id="expJson">⬇ 下载 .json（Obsidian 插件导入）</button>
+        <button class="btn sm ghost" id="impJson">⬆ 导入插件写回的 sync.time.json（双向同步）</button>
+        <input type="file" id="impFile" accept=".json" style="display:none">
+        <button class="btn sm ghost" id="resetDemo" style="margin-left:auto;color:#b91c1c">↺ 重置演示数据</button>
+      </div>
+      <pre class="md" id="mdPreview"></pre>
+    </div>
+  </section>
+</main>
+
+<!-- 悬浮窗 -->
+<div id="widget">
+  <div class="wh" id="wh"><span class="live"></span><span class="tt">时间账本 · 悬浮窗</span><button class="min" id="wMin">—</button></div>
+  <div class="wb" id="wb"></div>
+</div>
+
+<!-- 结束事件选类别 -->
+<div id="mask">
+  <div class="modal">
+    <h4>「<span id="mEvent"></span>」完成了 ✅</h4>
+    <div class="sub">这件事属于哪类时间？（用于统计与优化）</div>
+    <div class="catgrid" id="mCats"></div>
+  </div>
+</div>
+
+<!-- 自然语言补录弹窗 -->
+<div id="retroMask">
+  <div class="modal" style="width:370px">
+    <h4>✍️ 补记这条记录</h4>
+    <div class="sub">已按你的描述智能解析，可修改后归档</div>
+    <input id="rtName" class="rti" placeholder="事件名">
+    <div class="rtr"><label>开始</label><input type="datetime-local" id="rtStart"><label>结束</label><input type="datetime-local" id="rtEnd"></div>
+    <div class="catgrid" id="rtCats"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn ghost" style="flex:1" onclick="document.getElementById('retroMask').classList.remove('on')">取消</button>
+      <button class="btn" style="flex:1" id="rtOk">✔ 归档</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 数据层 ================= */
+const LS='lyubishchev-tracker-v2';
+const DAY_MS=86400000;
+const CATS_SEED=[
+  {id:'deep', name:'深度工作', color:'#4f6df5'},
+  {id:'study',name:'学习',     color:'#8b5cf6'},
+  {id:'read', name:'阅读',     color:'#0ea5e9'},
+  {id:'sport',name:'运动',     color:'#10b981'},
+  {id:'meet', name:'会议沟通', color:'#f59e0b'},
+  {id:'life', name:'生活琐事', color:'#f97316'},
+  {id:'fun',  name:'娱乐休息', color:'#ec4899'},
+  {id:'sleep',name:'睡眠',     color:'#94a3b8'},
+];
+const NAMES={deep:['写方案','代码实现','深度写作','需求设计'],study:['学英语','在线课程','背知识点'],
+  read:['读书','行业资讯'],sport:['跑步','健身','打球'],meet:['站会','客户沟通','评审会'],
+  life:['做饭','家务','通勤','吃饭'],fun:['刷视频','游戏','闲聊'],sleep:['睡眠']};
+
+let state=load()||seed();
+let running=state.running||null;      // {name,start}
+let pendingEnd=null;                  // 刚结束待分类的记录
+
+function load(){try{const s=JSON.parse(localStorage.getItem(LS));return s&&s.cats?s:null}catch(e){return null}}
+function save(){state.running=running;localStorage.setItem(LS,JSON.stringify(state))}
+
+function seed(){
+  const cats=CATS_SEED.map(c=>({...c}));
+  const recs=[];const now=new Date();const weights=[['deep',3],['study',2],['read',2],['sport',1],['meet',2],['life',3],['fun',2]];
+  const pool=weights.flatMap(([id,w])=>Array(w).fill(id));let rnd=42;const rand=()=>{rnd=(rnd*9301+49297)%233280;return rnd/233280};
+  for(let off=34;off>=0;off--){
+    const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-off);
+    let cur=d.getTime()+7*3600000;const endDay=d.getTime()+23*3600000;const limit=off===0?now.getTime()-1800000:endDay;
+    while(cur<Math.min(endDay,limit)){
+      const cid=pool[Math.floor(rand()*pool.length)];
+      let dur=(0.5+rand()*2)*3600000;
+      if(cur+dur>limit)dur=Math.max(600000,limit-cur);
+      const list=NAMES[cid];recs.push({id:'r'+cur,name:list[Math.floor(rand()*list.length)],cat:cid,start:cur,end:cur+dur});
+      cur+=dur;
+    }
+    // 睡眠：前一天 23:00 到当天 7:00
+    recs.push({id:'s'+d.getTime(),name:'睡眠',cat:'sleep',start:d.getTime()-3600000,end:d.getTime()+7*3600000});
+  }
+  return {cats,records:recs,running:null};
+}
+
+/* ================= 工具 ================= */
+const $=s=>document.querySelector(s);
+const pad=n=>String(n).padStart(2,'0');
+function fmtHM(ms){const m=Math.round(ms/60000);return m>=60?Math.floor(m/60)+'h'+pad(m%60)+'m':m+'m'}
+function fmtHMshort(ms){const h=ms/3600000;return h.toFixed(1)+'h'}
+function clock(ts){const d=new Date(ts);return pad(d.getHours())+':'+pad(d.getMinutes())}
+function dstr(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function dayStart(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime()}
+function catOf(id){return state.cats.find(c=>c.id===id)||state.cats[0]}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('on'),1800)}
+function hexA(hex,a){const n=parseInt(hex.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}
+
+function byCat(recs){const m={};recs.forEach(r=>m[r.cat]=(m[r.cat]||0)+(r.end-r.start));return m}
+
+/* ================= 页签切换 ================= */
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('section.tab').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');$('#tab-'+b.dataset.tab).classList.add('on');
+  if(b.dataset.tab==='stats')renderStats();
+  if(b.dataset.tab==='export')renderExport();
+  if(b.dataset.tab==='cats')renderCats();
+  if(b.dataset.tab==='timeline')renderTimeline();
+});
+
+/* ================= 今日时间轴 ================= */
+const H0=5,H1=27,HH=40; // 5:00 ~ 次日3:00
+function renderTimeline(){
+  const now=new Date(),ds=dayStart(now);
+  $('#dateLabel').textContent=now.getFullYear()+' 年 '+(now.getMonth()+1)+' 月 '+now.getDate()+' 日 · '+['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
+  const recs=state.records.filter(r=>r.start<ds+H1*3600000&&r.end>ds+H0*3600000);
+  const total=recs.reduce((s,r)=>s+Math.min(r.end,ds+DAY_MS)-Math.max(r.start,ds),0);
+  const deep=recs.filter(r=>r.cat==='deep').reduce((s,r)=>s+(r.end-r.start),0);
+  $('#dayStrip').innerHTML=`
+    <div class="stat"><div class="k">今日已记录</div><div class="v">${fmtHM(total)}</div></div>
+    <div class="stat"><div class="k">深度工作</div><div class="v">${fmtHM(deep)}</div></div>
+    <div class="stat"><div class="k">事件数</div><div class="v">${recs.length} <small>件</small></div></div>
+    <div class="stat"><div class="k">平均单件事长</div><div class="v">${recs.length?fmtHM(total/recs.length):'—'}</div></div>`;
+  let hours='';for(let h=H0;h<H1;h++)hours+=`<div>${pad(h%24)}:00</div>`;
+  let lane='',has=false;
+  recs.forEach(r=>{
+    const s=Math.max(r.start,ds+H0*3600000),e=Math.min(r.end,ds+H1*3600000);
+    const top=(s-(ds+H0*3600000))/3600000*HH,hgt=Math.max(14,(e-s)/3600000*HH-2);
+    const c=catOf(r.cat);has=true;
+    lane+=`<div class="ev" style="top:${top}px;height:${hgt}px;background:${hexA(c.color,.16)};border-color:${c.color}" title="${esc(r.name)}｜${c.name}｜${clock(r.start)}–${clock(r.end)}（${fmtHM(r.end-r.start)}）">
+      <div class="n">${esc(r.name)}</div><div class="d">${clock(r.start)}–${clock(r.end)} · ${fmtHM(r.end-r.start)}</div></div>`;
+  });
+  const nowMin=(now.getTime()-(ds+H0*3600000))/3600000;
+  if(nowMin>0&&nowMin<H1-H0)lane+=`<div class="nowline" style="top:${nowMin*HH}px"></div>`;
+  if(!has)lane+=`<div class="empty-hint">今天还没有记录 —— 从右下角悬浮窗开始第一件事吧</div>`;
+  $('#laneHint').textContent=`${pad(H0)}:00 – 次日 ${pad(H1%24)}:00`;
+  $('#tlWrap').innerHTML=`<div class="hours">${hours}</div><div class="lane" style="height:${(H1-H0)*HH}px">${lane}</div>`;
+}
+
+/* ================= 周 / 月统计 ================= */
+let P={type:'week',off:0};
+document.querySelectorAll('#tab-stats .seg button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tab-stats .seg button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');P={type:b.dataset.p,off:0};renderStats();
+});
+$('#prevP').onclick=()=>{P.off--;renderStats()};
+$('#nextP').onclick=()=>{if(P.off<0){P.off++;renderStats()}};
+
+function periodRange(){
+  const now=new Date();
+  if(P.type==='week'){
+    const mon=new Date(now.getFullYear(),now.getMonth(),now.getDate()-((now.getDay()+6)%7)+P.off*7);
+    return [dayStart(mon),dayStart(mon)+7*DAY_MS];
+  }
+  const m=new Date(now.getFullYear(),now.getMonth()+P.off,1);
+  return [m.getTime(),new Date(now.getFullYear(),now.getMonth()+P.off+1,1).getTime()];
+}
+
+function renderStats(){
+  const [s,e]=periodRange();
+  const lbl=P.type==='week'
+    ?`${dstr(new Date(s))} ~ ${dstr(new Date(e-DAY_MS))}`
+    :`${new Date(s).getFullYear()} 年 ${new Date(s).getMonth()+1} 月`;
+  $('#prLabel').textContent=lbl+(P.off===0?'（当前）':'');
+  const recs=state.records.filter(r=>r.start<e&&r.end>s);
+  const agg=byCat(recs);const total=Object.values(agg).reduce((a,b)=>a+b,0)||1;
+  const items=Object.entries(agg).map(([id,ms])=>({c:catOf(id),ms})).sort((a,b)=>b.ms-a.ms);
+  drawPie($('#pieA'),items,total);
+  $('#legA').innerHTML=items.map(i=>`<div class="row"><span class="dot" style="background:${i.c.color}"></span><span class="nm">${esc(i.c.name)}</span><span>${fmtHM(i.ms)}</span><span class="pc">${(i.ms/total*100).toFixed(1)}%</span></div>`).join('');
+  // 时长排行条
+  const cv=$('#pieB'),ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);
+  const max=items[0]?items[0].ms:1,bw=210,bx=70;
+  items.forEach((i,k)=>{
+    const y=14+k*26,w=Math.max(3,i.ms/max*bw);
+    ctx.fillStyle='#c9cdd6';ctx.font='12px sans-serif';ctx.textAlign='right';ctx.fillText(i.c.name,bx-10,y+13);
+    ctx.fillStyle=i.c.color;roundRect(ctx,bx,y,w,16,8);ctx.fill();
+    ctx.fillStyle='#5b6170';ctx.textAlign='left';ctx.fillText(fmtHMshort(i.ms),bx+w+8,y+13);
+  });
+  $('#legB').innerHTML=`<div class="muted">单位：小时 · 悬停看细节，点击图例可筛选（演示）</div>`;
+  // 洞察
+  const deepM=agg['deep']||0,top=items[0];
+  let cmp='';
+  if(P.type==='week'&&P.off===0){
+    const ps=s-7*DAY_MS,pe=s;
+    const prev=byCat(state.records.filter(r=>r.start<pe&&r.end>ps))['deep']||0;
+    const d=(deepM-prev)/3600000;
+    cmp=`<div class="insight">💼 本周深度工作 <b>${fmtHM(deepM)}</b><br>较上周 ${d>=0?'⬆ +':'⬇ '}${Math.abs(d).toFixed(1)} 小时</div>`;
+  }
+  const sleepM=agg['sleep']||0;
+  $('#insights').innerHTML=(cmp||'')+
+    (top?`<div class="insight">🏆 占用最多的是「${esc(top.c.name)}」<br><b>${fmtHM(top.ms)}</b>，占 ${(top.ms/total*100).toFixed(1)}%</div>`:'')+
+    (sleepM?`<div class="insight">😴 睡眠 <b>${fmtHM(sleepM)}</b><br>平均 ${fmtHM(sleepM/Math.max(1,(e-s)/DAY_MS))} / 天</div>`:'')+
+    `<div class="insight">🎯 优化建议：把「${top?esc(top.c.name):'—'}」中非核心部分标记为低价值类别，下周观察占比是否下降。</div>`;
+}
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+
+function drawPie(cv,items,total){
+  const ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);
+  const cx=cv.width/2,cy=cv.height/2,R=88;let a=-Math.PI/2;
+  const segs=items.map(i=>{const a2=a+i.ms/total*Math.PI*2;const seg={...i,a0:a,a1:a2};a=a2;return seg});
+  cv._segs=segs;cv._total=total;
+  paintPie(cv,-1);
+  cv.onmousemove=ev=>{
+    const r=cv.getBoundingClientRect(),x=(ev.clientX-r.left)*(cv.width/r.width)-cx,y=(ev.clientY-r.top)*(cv.height/r.height)-cy;
+    const ang=Math.atan2(y,x);let idx=-1;
+    segs.forEach((s,i)=>{let a0=s.a0,a1=s.a1;let A=ang;if(A<-Math.PI/2)A+=Math.PI*2;if(A>=a0&&A<a1)idx=i});
+    cv.style.cursor=idx>=0?'pointer':'default';paintPie(cv,idx);
+    if(idx>=0){const s=segs[idx];$('#legA').innerHTML=`<div class="row"><span class="dot" style="background:${s.c.color}"></span><span class="nm"><b>${esc(s.c.name)}</b></span><span>${fmtHM(s.ms)}</span><span class="pc">${(s.ms/total*100).toFixed(1)}%</span></div>`}
+  };
+  cv.onmouseleave=()=>{paintPie(cv,-1);renderStatsLeg(items,total)};
+}
+function paintPie(cv,hi){
+  const ctx=cv.getContext('2d'),cx=cv.width/2,cy=cv.height/2,R=88;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  (cv._segs||[]).forEach((s,i)=>{
+    const off=i===hi?7:0,mid=(s.a0+s.a1)/2;
+    ctx.beginPath();ctx.moveTo(cx+Math.cos(mid)*off,cy+Math.sin(mid)*off);
+    ctx.arc(cx+Math.cos(mid)*off,cy+Math.sin(mid)*off,R,s.a0,s.a1);
+    ctx.closePath();ctx.fillStyle=s.c.color;ctx.globalAlpha=i===hi?1:.88;ctx.fill();ctx.globalAlpha=1;
+  });
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(cx,cy,48,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#1f2430';ctx.font='700 15px sans-serif';ctx.textAlign='center';
+  ctx.fillText(fmtHM(cv._total||0),cx,cy+2);
+  ctx.fillStyle='#8a8f9c';ctx.font='11px sans-serif';ctx.fillText('总计',cx,cy+18);
+}
+function renderStatsLeg(items,total){$('#legA').innerHTML=items.map(i=>`<div class="row"><span class="dot" style="background:${i.c.color}"></span><span class="nm">${esc(i.c.name)}</span><span>${fmtHM(i.ms)}</span><span class="pc">${(i.ms/total*100).toFixed(1)}%</span></div>`).join('')}
+
+/* ================= 类别管理 ================= */
+function renderCats(){
+  const agg=byCat(state.records);
+  $('#catList').innerHTML=state.cats.map(c=>`
+    <div class="catrow" data-id="${c.id}">
+      <input type="color" value="${c.color}" data-f="color">
+      <input class="txt" value="${esc(c.name)}" data-f="name">
+      <span class="hrs">${fmtHM(agg[c.id]||0)}</span>
+      <button class="del" title="删除类别">✕</button>
+    </div>`).join('');
+  document.querySelectorAll('.catrow').forEach(row=>{
+    const id=row.dataset.id,cat=state.cats.find(c=>c.id===id);
+    row.querySelectorAll('input').forEach(inp=>inp.onchange=()=>{
+      if(inp.dataset.f==='color')cat.color=inp.value;else cat.name=inp.value||cat.name;
+      save();toast('类别已更新');renderCats();
+    });
+    row.querySelector('.del').onclick=()=>{
+      if(state.cats.length<=1)return toast('至少保留一个类别');
+      state.records.forEach(r=>{if(r.cat===id)r.cat=state.cats.find(c=>c.id!==id).id});
+      state.cats=state.cats.filter(c=>c.id!==id);save();renderCats();toast('类别已删除，记录已转移');
+    };
+  });
+}
+$('#addCatBtn').onclick=()=>{
+  const nm=$('#newCatName').value.trim();if(!nm)return toast('请输入类别名称');
+  state.cats.push({id:'c'+Date.now(),name:nm,color:$('#newCatColor').value});
+  $('#newCatName').value='';save();renderCats();toast('已添加类别「'+nm+'」');
+};
+
+/* ================= 悬浮窗（开始 / 结束计时） ================= */
+let minimized=false;
+let wMode='timer'; // timer | retro
+function renderWidget(){
+  const wh=$('#wh'),wb=$('#wb');
+  wh.classList.toggle('running',!!running);
+  if(minimized){wb.innerHTML='';return}
+  const tabs=`<div class="wrow" style="margin-top:0;margin-bottom:10px">
+      <button class="btnw" id="wTabT" style="background:${wMode==='timer'?'#4f6df5':'#2a3040'};color:#fff">⏱ 计时</button>
+      <button class="btnw" id="wTabR" style="background:${wMode==='retro'?'#4f6df5':'#2a3040'};color:#fff">✍️ 补录</button>
+    </div>`;
+  if(!running){
+    if(wMode==='timer'){
+      wb.innerHTML=tabs+`<input class="wi" id="wi" placeholder="正在做什么？回车开始计时">
+        <div class="wrow"><button class="btnw start" id="wStart">▶ 开始</button></div>
+        <div class="wfoot">开始自动记录时间，结束后再选类别</div>`;
+      const inp=$('#wi');
+      const go=()=>{const v=inp.value.trim();if(!v)return toast('先写件事儿~');startEvent(v)};
+      $('#wStart').onclick=go;
+      inp.onkeydown=e=>{if(e.key==='Enter')go()};
+    }else{
+      wb.innerHTML=tabs+`<input class="wi" id="wi" placeholder="说一句话补记，如：下午3点到4点开会">
+        <div class="wrow"><button class="btnw start" id="wParse">⚡ 智能解析</button></div>
+        <div class="wfoot">也支持：「刚才」/「昨晚」/「看书2小时」</div>`;
+      const inp=$('#wi');
+      const go=()=>{const v=inp.value.trim();if(!v)return toast('先描述一下这件事');doParse(v)};
+      $('#wParse').onclick=go;
+      inp.onkeydown=e=>{if(e.key==='Enter')go()};
+    }
+    $('#wTabT').onclick=()=>{wMode='timer';renderWidget()};
+    $('#wTabR').onclick=()=>{wMode='retro';renderWidget()};
+  }else{
+    wb.innerHTML=`<div class="wname">● ${esc(running.name)}</div>
+      <div class="wtime" id="wTime">00:00</div>
+      <div class="wrow"><button class="btnw stop" id="wStop">■ 结束并分类</button></div>
+      <div class="wfoot">开始于 ${clock(running.start)}</div>`;
+    $('#wStop').onclick=stopEvent;
+    tick();
+function startEvent(name){running={name,start:Date.now()};save();renderWidget();toast('计时开始：'+name)}
+function stopEvent(){
+  const end=Date.now();
+  pendingEnd={id:'r'+end,name:running.name,cat:null,start:running.start,end};
+  running=null;save();
+  $('#mEvent').textContent=pendingEnd.name;
+  $('#mCats').innerHTML=state.cats.map(c=>`<button data-id="${c.id}"><span class="dot" style="background:${c.color}"></span>${esc(c.name)}</button>`).join('');
+  document.querySelectorAll('#mCats button').forEach(b=>b.onclick=()=>{
+    pendingEnd.cat=b.dataset.id;
+    state.records.push(pendingEnd);save();
+    $('#mask').classList.remove('on');
+    renderWidget();renderTimeline();
+    toast(`已归档：${pendingEnd.name} · ${catOf(pendingEnd.cat).name} · ${fmtHM(pendingEnd.end-pendingEnd.start)}`);
+  });
+  $('#mask').classList.add('on');
+  renderWidget();
+}
+function tick(){
+  if(!running)return;
+  const el=Date.now()-running.start,m=Math.floor(el/60000);
+  const t=$('#wTime');if(t)t.textContent=pad(Math.floor(m/60))+':'+pad(m%60);
+  setTimeout(tick,1000);
+}
+$('#mask').onclick=e=>{if(e.target.id==='mask'){
+  // 取消分类：记为第一个类别，不丢数据
+  pendingEnd.cat=state.cats[0].id;state.records.push(pendingEnd);save();
+  $('#mask').classList.remove('on');renderTimeline();
+  toast('已按「'+state.cats[0].name+'」归档（可在时间轴查看）');
+}};
+$('#wMin').onclick=()=>{minimized=!minimized;$('#wMin').textContent=minimized?'▢':'—';renderWidget()};
+// 拖拽
+(function(){
+  const w=$('#widget'),h=$('#wh');let sx,sy,ox,oy,drag=false;
+  h.addEventListener('mousedown',e=>{if(e.target.id==='wMin')return;drag=true;sx=e.clientX;sy=e.clientY;ox=w.offsetLeft;oy=w.offsetTop});
+  window.addEventListener('mousemove',e=>{if(!drag)return;
+    w.style.left=Math.max(0,Math.min(innerWidth-280,ox+e.clientX-sx))+'px';
+    w.style.top=Math.max(0,Math.min(innerHeight-160,oy+e.clientY-sy))+'px';
+    w.style.right='auto';w.style.bottom='auto'});
+  window.addEventListener('mouseup',()=>drag=false);
+})();
+
+/* ================= 导出 / Obsidian ================= */
+function buildMarkdown(){
+  const now=new Date(),ds=dayStart(now);
+  const recs=state.records.filter(r=>r.start<ds+DAY_MS&&r.end>ds).sort((a,b)=>a.start-b.start);
+  const agg=byCat(recs);const total=Object.values(agg).reduce((a,b)=>a+b,0)||1;
+  let md=`# ⏱ ${dstr(now)} 时间日志\n\n> 由「柳比歇夫时间账本」导出\n\n## 类别统计\n\n`;
+  Object.entries(agg).sort((a,b)=>b[1]-a[1]).forEach(([id,ms])=>{
+    md+=`- **${catOf(id).name}** ${fmtHM(ms)}（${(ms/total*100).toFixed(1)}%）\n`;
+  });
+  md+=`\n## 时间线\n\n| 时间 | 事件 | 类别 | 时长 |\n|---|---|---|---|\n`;
+  recs.forEach(r=>{md+=`| ${clock(r.start)}–${clock(r.end)} | ${r.name} | ${catOf(r.cat).name} | ${fmtHM(r.end-r.start)} |\n`});
+  return md;
+}
+function renderExport(){$('#mdPreview').textContent=buildMarkdown()}
+function download(name,content,type){
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();
+}
+$('#expCopy').onclick=()=>{navigator.clipboard.writeText(buildMarkdown()).then(()=>toast('Markdown 已复制，可粘贴到 Obsidian 日记'))};
+$('#expMd').onclick=()=>download(`时间日志-${dstr(new Date())}.md`,buildMarkdown(),'text/markdown');
+$('#expJson').onclick=()=>{
+  const payload={app:'lyubishchev-tracker',version:1,exportedAt:new Date().toISOString(),
+    categories:state.cats,records:state.records.filter(r=>r.start>=dayStart(new Date())-30*DAY_MS)};
+  download(`时间日志-${dstr(new Date())}.time.json`,JSON.stringify(payload,null,2),'application/json');
+};
+$('#resetDemo').onclick=()=>{if(confirm('确定清空并重新生成演示数据？')){localStorage.removeItem(LS);state=seed();running=null;save();
+  renderTimeline();renderStats();renderCats();renderExport();renderWidget();toast('演示数据已重置')}};
+
+/* ---- 双向同步：导入 Obsidian 插件写回的 sync.time.json ---- */
+$('#helpBtn').onclick=()=>$('#helpMask').classList.add('on');
+$('#helpMask').onclick=e=>{if(e.target.id==='helpMask')$('#helpMask').classList.remove('on')};
+$('#impJson').onclick=()=>$('#impFile').click();
+$('#impFile').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const j=JSON.parse(rd.result);
+      const byId={};state.records.forEach(r=>byId[r.id]=r);
+      (j.records||[]).forEach(r=>byId[r.id]=r);
+      state.records=Object.values(byId).sort((a,b)=>a.start-b.start);
+      (j.categories||[]).forEach(c=>{const i=state.cats.findIndex(x=>x.id===c.id);if(i>=0)state.cats[i]=c;else state.cats.push(c)});
+      save();renderTimeline();renderStats();renderCats();renderExport();
+      toast(`已导入插件写回的数据：${(j.records||[]).length} 条记录`);
+    }catch(err){toast('文件解析失败，请确认是插件写回的 sync.time.json')}
+  };
+  rd.readAsText(f);e.target.value='';
+};
+
+    $('#wStop').onclick=stopEvent;
+    tick();
+  }
+}
+
+/* ================= B. 自然语言补录 ================= */
+let retroDraft=null;
+const CAT_KEYS=[['deep','写代码|写方案|写作|开发|编程|设计|深度|赶稿|写PPT|做PPT'],['study','学|上课|课程|背单词|备考|练习'],
+ ['read','读书|阅读|看书|读了'],['sport','跑步|健身|运动|游泳|打球|瑜伽|锻炼'],['meet','开会|会议|站会|评审|沟通|讨论|电话|客户|汇报|面试'],
+ ['life','做饭|吃饭|家务|通勤|买菜|洗漱|打扫|拿快递'],['fun','刷视频|刷手机|游戏|打游|看剧|追剧|电影|综艺|闲逛|刷知乎|微博|闲聊'],
+ ['sleep','睡觉|睡眠|午睡|午休|眯|躺']];
+function guessCat(name){for(const [id,pat] of CAT_KEYS){if(new RegExp(pat).test(name))return id}return null}
+function parseNatural(raw){
+  const now=Date.now(),ds=dayStart(new Date());
+  let t=raw.trim(),dayOff=0,force=null;
+  if(/昨晚/.test(t)){dayOff=-1;force='pm';t=t.replace('昨晚','')}
+  else if(/昨天/.test(t)){dayOff=-1;t=t.replace('昨天','')}
+  else if(/下午|晚上/.test(t)){force='pm';t=t.replace(/下午|晚上/g,'')}
+  else if(/中午/.test(t)){force='noon';t=t.replace('中午','')}
+  else if(/凌晨/.test(t)){force='am';t=t.replace('凌晨','')}
+  else if(/早上|上午|今早/.test(t)){force='am';t=t.replace(/早上|上午|今早/g,'')}
+  else{t=t.replace('今天','')}
+  t=t.replace(/(\d{1,2})\s*[:：点]\s*半/g,'$1:30').replace(/(\d{1,2})\s*[:：点]\s*一刻/g,'$1:15');
+  const base=ds+dayOff*DAY;
+  const mk=(h,mm)=>{let H=h;if((force==='pm'||force==='noon')&&H<12)H+=12;if(force==='am'&&H===12)H=0;return base+H*3600000+mm*60000};
+  // 抽取时刻
+  const times=[];let m,name=t;
+  const re=/(\d{1,2})\s*[:：点]\s*(\d{1,2})?\s*分?/g;
+  while((m=re.exec(t)))times.push({h:+m[1],mm:m[2]?+m[2]:0,s:m[0]});
+  // 抽取时长
+  let durMs=null;
+  const dr=/(\d+(?:\.\d+)?)\s*(?:个)?\s*(小时|钟头|h|分钟|分)/i.exec(t);
+  if(dr){durMs=parseFloat(dr[1])*(/小时|钟头|h/i.test(dr[2])?3600000:60000)}
+  // 事件名：去掉时间词和连接词
+  times.forEach(x=>name=name.replace(x.s,' '));
+  if(dr)name=name.replace(dr[0],' ');
+  name=name.replace(/(刚刚?|刚才|从|了|大概|大约|差不多|前后|一共|共|我|去|个|把|是|在|睡了个?)/g,' ')
+           .replace(/到|至|~|–|-/g,' ').replace(/\s+/g,' ').trim();
+  if(!name)name='未命名事件';
+  let start,end;
+  if(times.length>=2){
+    start=mk(times[0].h,times[0].mm);end=mk(times[1].h,times[1].mm);
+    let guard=0;while(end<=start&&guard++<2)end+=12*3600000;
+    if(end>now+600000)end-=24*3600000; // 解析出未来时间则回退一天
+  }else if(durMs){
+    if(times.length===1){start=mk(times[0].h,times[0].mm);end=start+durMs}
+    else{end=now;start=end-durMs}
+  }else if(times.length===1){
+    start=mk(times[0].h,times[0].mm);end=Math.min(now,start+2*3600000);
+    if(end<=start)end=start+3600000;
+  }else{end=now;start=end-30*60000}
+  if(end<=start)end=start+30*60000;
+  return {name,start,end,cat:guessCat(name)};
+}
+function dtl(ts){const d=new Date(ts);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())}
+function doParse(text){
+  const d=parseNatural(text);retroDraft=d;
+  $('#rtName').value=d.name;$('#rtStart').value=dtl(d.start);$('#rtEnd').value=dtl(d.end);
+  const sug=guessCat(d.name);
+  $('#rtCats').innerHTML=state.cats.map(c=>`<button data-id="${c.id}" class="${c.id===sug?'sel':''}"><span class="dot" style="background:${c.color}"></span>${esc(c.name)}</button>`).join('');
+  document.querySelectorAll('#rtCats button').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('#rtCats button').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel');retroDraft.cat=b.dataset.id;
+  });
+  retroDraft.cat=sug;
+  $('#rtOk').onclick=()=>{
+    const nm=$('#rtName').value.trim();if(!nm)return toast('写个事件名');
+    const s=new Date($('#rtStart').value).getTime(),e=new Date($('#rtEnd').value).getTime();
+    if(!(e>s))return toast('结束时间要晚于开始时间');
+    if(!retroDraft.cat){retroDraft.cat=state.cats[0].id}
+    state.records.push({id:'r'+Date.now(),name:nm,cat:retroDraft.cat,start:s,end:e});
+    save();$('#retroMask').classList.remove('on');
+    renderTimeline();renderStats();renderExport();
+    toast(`已补录：${nm} · ${catOf(retroDraft.cat).name} · ${fmtHM(e-s)}`);
+  };
+  $('#retroMask').classList.add('on');
+}
+$('#retroMask').onclick=e=>{if(e.target.id==='retroMask')$('#retroMask').classList.remove('on')};
+
+/* ================= C. AI 复盘教练 ================= */
+let aiMsgs=null;
+const KEY_LS='lyu-aikey';
+function periodPayload(){
+  const [s,e]=periodRange();
+  const recs=state.records.filter(r=>r.start<e&&r.end>s);
+  const agg=byCat(recs);const total=Object.values(agg).reduce((a,b)=>a+b,0)||1;
+  const days=Math.max(1,(e-s)/DAY);
+  const items=Object.entries(agg).map(([id,ms])=>({类别:catOf(id).name,时长:fmtHM(ms),占比:+(ms/total*100).toFixed(1)+'%'})).sort((a,b)=>parseFloat(b.占比)-parseFloat(a.占比));
+  const evNames=[...new Set(recs.map(r=>r.name))].slice(0,25);
+  return {周期:P.type==='week'?'本周':'本月',范围:dstr(new Date(s))+' ~ '+dstr(new Date(e-DAY)),日均记录:fmtHM(total/days),
+    类别统计:items,事件样例:evNames};
+}
+function localReviewText(){
+  const p=periodPayload();
+  const [s,e]=periodRange();
+  const recs=state.records.filter(r=>r.start<e&&r.end>s);
+  const agg=byCat(recs);const total=Object.values(agg).reduce((a,b)=>a+b,0)||1;
+  const days=Math.max(1,(e-s)/DAY);
+  const deep=agg.deep||0,fun=agg.fun||0,sleep=agg.sleep||0,meet=agg.meet||0;
+  const top=Object.entries(agg).sort((a,b)=>b[1]-a[1])[0];
+  const L=[`📊 概况：${p.周期}共记录 ${fmtHM(total)}，日均 ${fmtHM(total/days)}。`];
+  L.push(`✨ 亮点：投入最多的是「${top?catOf(top[0]).name:'—'}」（${top?fmtHM(top[1]):'—'}）；深度工作 ${fmtHM(deep)}。`);
+  const holes=[];
+  if(fun/total>0.25)holes.push(`🕳 时间黑洞：娱乐休息占 ${(fun/total*100).toFixed(1)}%（超过 25% 警戒线），建议下周压到 20% 以内`);
+  if(meet/total>0.15)holes.push(`🕳 会议沟通占 ${(meet/total*100).toFixed(1)}%，尝试把部分会议改成异步文字沟通`);
+  if(sleep&&sleep/days<7*3600000)holes.push(`🕳 日均睡眠仅 ${fmtHM(sleep/days)}，长期不足会吃掉白天的效率`);
+  if(deep/total<0.15)holes.push(`🕳 深度工作占比 ${(deep/total*100).toFixed(1)}% 偏低，尝试把最重要的工作固定在每天上午第一段`);
+  L.push(holes.length?holes.join('\n'):'✨ 未发现明显时间黑洞，结构健康，保持！');
+  L.push(`🎯 建议：① 给「娱乐休息」设一个心理上限，超线当天就停；② 每天开工第一件事先记「深度工作」再开电脑；③ 周日用 10 分钟对照本周饼图做下周计划。`);
+  return L.join('\n\n')+'\n\n— 本地规则版复盘 · 填入 Moonshot API Key 可体验完整 AI 教练';
+}
+async function callKimi(key,msgs){
+  const r=await fetch('https://api.moonshot.cn/v1/chat/completions',{method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model:'moonshot-v1-8k',messages:msgs,temperature:0.5})});
+  if(!r.ok)throw new Error('HTTP '+r.status+(r.status===401?'（Key 无效）':''));
+  const j=await r.json();
+  return j.choices[0].message.content.trim();
+}
+$('#aiKey').value=localStorage.getItem(KEY_LS)||'';
+$('#aiKey').onchange=e=>{localStorage.setItem(KEY_LS,e.target.value.trim());toast('API Key 已保存到本机')};
+$('#aiGo').onclick=async()=>{
+  const key=$('#aiKey').value.trim(),out=$('#aiOut');
+  out.textContent='⏳ 正在生成复盘…';
+  if(!key){setTimeout(()=>{out.textContent=localReviewText();$('#aiFollowRow').style.display='flex';aiMsgs=null},400);return}
+  try{
+    aiMsgs=[{role:'system',content:'你是柳比歇夫式时间管理教练。基于用户的时间统计数据，用中文生成精炼复盘，结构：📊概况 / ✨亮点 / 🕳时间黑洞 / 🎯下周可执行建议。要求具体、坦诚、不空洞，300字以内。'},
+      {role:'user',content:'这是我的时间统计数据（JSON）：\n'+JSON.stringify(periodPayload())}];
+    const res=await callKimi(key,aiMsgs);
+    aiMsgs.push({role:'assistant',content:res});
+    out.textContent=res;$('#aiFollowRow').style.display='flex';
+  }catch(err){
+    out.textContent='⚠️ AI 调用失败（'+err.message+'）——可能是 Key 无效或浏览器跨域限制，已改用本地规则版：\n\n'+localReviewText();
+    $('#aiFollowRow').style.display='flex';aiMsgs=null;
+  }
+};
+$('#aiAsk').onclick=async()=>{
+  const q=$('#aiQ').value.trim();if(!q)return;
+  const out=$('#aiOut'),key=$('#aiKey').value.trim();
+  out.textContent+='\n\n🧑 我：'+q+'\n\n⏳ …';$('#aiQ').value='';
+  if(!key||!aiMsgs){setTimeout(()=>{out.textContent+=q.includes('少')||q.includes('为什么')?
+    '\n\n🤖 教练（本地版）：建议先看「统计优化」页的类别环比变化，把下降类别的典型记录挑出来，判断是任务变少还是被打断变多。':
+    '\n\n🤖 教练（本地版）：把这个问题落到具体类别上——打开饼图找到占比异常的那块，挑 3 条典型记录逐条问「这件事非做不可吗」。'},500);return}
+  try{
+    aiMsgs.push({role:'user',content:q});
+    const res=await callKimi(key,aiMsgs);
+    aiMsgs.push({role:'assistant',content:res});
+    out.textContent+='\n\n🤖 '+res;
+  }catch(e){out.textContent+='\n\n（追问失败：'+e.message+'）'}
+};
+
+/* ================= 启动 ================= */
+renderTimeline();renderStats();renderCats();renderExport();renderWidget();
+</script>
+</body>
+</html>
