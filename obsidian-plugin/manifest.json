@@ -1,0 +1,9 @@
+{
+  "id": "lyubishchev-time-log",
+  "name": "柳比歇夫时间账本",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "导入时间账本导出的 JSON，在 Obsidian 内查看周/月分类统计饼图，并把时间日志写入日记。",
+  "author": "Kimi Hackathon Team",
+  "isDesktopOnly": false
+}
