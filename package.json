@@ -1,0 +1,7 @@
+{
+  "name": "lyubishchev-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "柳比歇夫时间账本 · 网页 Demo（知乎黑客松）",
+  "scripts": { "dev": "node serve.js" }
+}
