@@ -8,6 +8,7 @@ const { Plugin, PluginSettingTab, Setting, ItemView, Notice, TFile, moment } = r
 const VIEW_TYPE = 'lyubishchev-stats';
 const SYNC_FILE = 'sync.time.json';
 const DAY = 86400000;
+function clipRecords(records,s,e){return records.filter(r=>r.start<e&&r.end>s).map(r=>({...r,start:Math.max(r.start,s),end:Math.min(r.end,e)}));}
 
 const DEFAULT_SETTINGS = { folder: '时间账本' };
 
@@ -83,7 +84,7 @@ module.exports = class TimeLogPlugin extends Plugin {
   /* ---------- 今日日记 ---------- */
   async insertDailyLog() {
     const ds = new Date(); ds.setHours(0, 0, 0, 0);
-    const recs = this.data.records.filter(r => r.start < ds.getTime() + DAY && r.end > ds.getTime());
+    const recs = clipRecords(this.data.records,ds.getTime(),ds.getTime()+DAY);
     if (!recs.length) { new Notice('今天还没有记录'); return; }
     const cat = (id) => (this.data.categories.find(c => c.id === id) || { name: '未分类' }).name;
     const hm = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m` : m + 'm'; };
@@ -101,7 +102,10 @@ module.exports = class TimeLogPlugin extends Plugin {
     if (target) { await this.app.vault.append(target, md); new Notice(`已追加到 ${target.path}`); }
     else {
       const p = `${this.settings.folder}/${today}.md`;
-      await this.app.vault.create(p, `# ${today}${md}`);
+      if (!this.app.vault.getAbstractFileByPath(this.settings.folder)) await this.app.vault.createFolder(this.settings.folder);
+      const existing=this.app.vault.getAbstractFileByPath(p);
+      if(existing instanceof TFile) await this.app.vault.append(existing,md);
+      else await this.app.vault.create(p, `# ${today}${md}`);
       new Notice(`已创建 ${p}`);
     }
   }
@@ -130,7 +134,7 @@ class StatsView extends ItemView {
   render() {
     const d = this.p.data;
     const [s, e] = this.range();
-    const recs = d.records.filter(r => r.start < e && r.end > s);
+    const recs = clipRecords(d.records,s,e);
     const agg = {}; recs.forEach(r => (agg[r.cat] = (agg[r.cat] || 0) + (r.end - r.start)));
     const cats = d.categories.length ? d.categories : [{ id: 'x', name: '未分类', color: '#94a3b8' }];
     const total = Object.values(agg).reduce((a, b) => a + b, 0) || 1;

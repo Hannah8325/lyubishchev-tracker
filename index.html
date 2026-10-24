@@ -167,6 +167,7 @@
 </div>
 
 <main>
+  <div class="card" style="margin-bottom:16px"><span id="modeLabel"></span><button class="btn sm ghost" id="toggleDemo" style="margin-left:12px">查看演示</button></div>
   <!-- 今日时间轴 -->
   <section class="tab on" id="tab-timeline">
     <div class="strip" id="dayStrip"></div>
@@ -196,9 +197,10 @@
       <div class="card" style="margin-top:16px;box-shadow:none" id="aiCard">
         <h3>✨ AI 复盘教练</h3>
         <div class="ctrl">
-          <input id="aiKey" placeholder="Moonshot API Key（可选；不填则使用本地规则版复盘）" style="flex:1;min-width:220px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px">
+          <input id="aiKey" type="password" autocomplete="off" placeholder="Moonshot API Key（可选；不填则使用本地规则版复盘）" style="flex:1;min-width:220px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px">
           <button class="btn sm" id="aiGo">生成复盘</button>
         </div>
+        <p class="muted">未配置密钥时使用本地规则，不发送数据。使用在线复盘会向 Moonshot 发送当前周期统计、事件名称及追问内容；请勿输入敏感信息。</p>
         <div id="aiOut" class="aiout">点「生成复盘」，AI 会基于当前周期的统计数据输出：📊 概况 · ✨ 亮点 · 🕳 时间黑洞 · 🎯 下周可执行建议。生成后还可以继续追问。</div>
         <div id="aiFollowRow" style="display:none;gap:8px;margin-top:10px">
           <input id="aiQ" placeholder="追问，如：为什么我这周深度工作变少了？" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px">
@@ -231,7 +233,7 @@
         <button class="btn sm ghost" id="expJson">⬇ 下载 .json（Obsidian 插件导入）</button>
         <button class="btn sm ghost" id="impJson">⬆ 导入插件写回的 sync.time.json（双向同步）</button>
         <input type="file" id="impFile" accept=".json" style="display:none">
-        <button class="btn sm ghost" id="resetDemo" style="margin-left:auto;color:#b91c1c">↺ 重置演示数据</button>
+        <button class="btn sm ghost" id="resetDemo" style="margin-left:auto;color:#b91c1c">清空当前账本</button>
       </div>
       <pre class="md" id="mdPreview"></pre>
     </div>
@@ -257,7 +259,7 @@
 <div id="retroMask">
   <div class="modal" style="width:370px">
     <h4>✍️ 补记这条记录</h4>
-    <div class="sub">已按你的描述智能解析，可修改后归档</div>
+    <div class="sub">已按规则解析；未指定的时间为估计值，请核对起止时间后归档</div>
     <input id="rtName" class="rti" placeholder="事件名">
     <div class="rtr"><label>开始</label><input type="datetime-local" id="rtStart"><label>结束</label><input type="datetime-local" id="rtEnd"></div>
     <div class="catgrid" id="rtCats"></div>
@@ -272,7 +274,9 @@
 
 <script>
 /* ================= 数据层 ================= */
-const LS='lyubishchev-tracker-v2';
+const REAL_LS='lyubishchev-tracker-v2';
+let LS=REAL_LS;
+let demoMode=false;
 const DAY_MS=86400000;
 const CATS_SEED=[
   {id:'deep', name:'深度工作', color:'#4f6df5'},
@@ -288,7 +292,8 @@ const NAMES={deep:['写方案','代码实现','深度写作','需求设计'],stu
   read:['读书','行业资讯'],sport:['跑步','健身','打球'],meet:['站会','客户沟通','评审会'],
   life:['做饭','家务','通勤','吃饭'],fun:['刷视频','游戏','闲聊'],sleep:['睡眠']};
 
-let state=load()||seed();
+function emptyState(){return {cats:CATS_SEED.map(c=>({...c})),records:[],running:null};}
+let state=load()||emptyState();
 let running=state.running||null;      // {name,start}
 let pendingEnd=null;                  // 刚结束待分类的记录
 
@@ -328,6 +333,7 @@ function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('on'),1800)}
 function hexA(hex,a){const n=parseInt(hex.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}
 
+function clipRecords(recs,s,e){return recs.filter(r=>r.start<e&&r.end>s).map(r=>({...r,start:Math.max(r.start,s),end:Math.min(r.end,e)}));}
 function byCat(recs){const m={};recs.forEach(r=>m[r.cat]=(m[r.cat]||0)+(r.end-r.start));return m}
 
 /* ================= 页签切换 ================= */
@@ -347,13 +353,14 @@ function renderTimeline(){
   const now=new Date(),ds=dayStart(now);
   $('#dateLabel').textContent=now.getFullYear()+' 年 '+(now.getMonth()+1)+' 月 '+now.getDate()+' 日 · '+['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
   const recs=state.records.filter(r=>r.start<ds+H1*3600000&&r.end>ds+H0*3600000);
-  const total=recs.reduce((s,r)=>s+Math.min(r.end,ds+DAY_MS)-Math.max(r.start,ds),0);
-  const deep=recs.filter(r=>r.cat==='deep').reduce((s,r)=>s+(r.end-r.start),0);
+  const daily=clipRecords(state.records,ds,ds+DAY_MS);
+  const total=daily.reduce((s,r)=>s+r.end-r.start,0);
+  const deep=daily.filter(r=>r.cat==='deep').reduce((s,r)=>s+(r.end-r.start),0);
   $('#dayStrip').innerHTML=`
     <div class="stat"><div class="k">今日已记录</div><div class="v">${fmtHM(total)}</div></div>
     <div class="stat"><div class="k">深度工作</div><div class="v">${fmtHM(deep)}</div></div>
-    <div class="stat"><div class="k">事件数</div><div class="v">${recs.length} <small>件</small></div></div>
-    <div class="stat"><div class="k">平均单件事长</div><div class="v">${recs.length?fmtHM(total/recs.length):'—'}</div></div>`;
+    <div class="stat"><div class="k">事件数</div><div class="v">${daily.length} <small>件</small></div></div>
+    <div class="stat"><div class="k">平均单件事长</div><div class="v">${daily.length?fmtHM(total/daily.length):'—'}</div></div>`;
   let hours='';for(let h=H0;h<H1;h++)hours+=`<div>${pad(h%24)}:00</div>`;
   let lane='',has=false;
   recs.forEach(r=>{
@@ -395,7 +402,7 @@ function renderStats(){
     ?`${dstr(new Date(s))} ~ ${dstr(new Date(e-DAY_MS))}`
     :`${new Date(s).getFullYear()} 年 ${new Date(s).getMonth()+1} 月`;
   $('#prLabel').textContent=lbl+(P.off===0?'（当前）':'');
-  const recs=state.records.filter(r=>r.start<e&&r.end>s);
+  const recs=clipRecords(state.records,s,e);
   const agg=byCat(recs);const total=Object.values(agg).reduce((a,b)=>a+b,0)||1;
   const items=Object.entries(agg).map(([id,ms])=>({c:catOf(id),ms})).sort((a,b)=>b.ms-a.ms);
   drawPie($('#pieA'),items,total);
@@ -409,21 +416,21 @@ function renderStats(){
     ctx.fillStyle=i.c.color;roundRect(ctx,bx,y,w,16,8);ctx.fill();
     ctx.fillStyle='#5b6170';ctx.textAlign='left';ctx.fillText(fmtHMshort(i.ms),bx+w+8,y+13);
   });
-  $('#legB').innerHTML=`<div class="muted">单位：小时 · 悬停看细节，点击图例可筛选（演示）</div>`;
+  $('#legB').innerHTML=`<div class="muted">单位：小时 · 仅统计当前周期内已记录的时长</div>`;
   // 洞察
   const deepM=agg['deep']||0,top=items[0];
   let cmp='';
   if(P.type==='week'&&P.off===0){
     const ps=s-7*DAY_MS,pe=s;
-    const prev=byCat(state.records.filter(r=>r.start<pe&&r.end>ps))['deep']||0;
+    const prev=byCat(clipRecords(state.records,ps,pe))['deep']||0;
     const d=(deepM-prev)/3600000;
     cmp=`<div class="insight">💼 本周深度工作 <b>${fmtHM(deepM)}</b><br>较上周 ${d>=0?'⬆ +':'⬇ '}${Math.abs(d).toFixed(1)} 小时</div>`;
   }
   const sleepM=agg['sleep']||0;
   $('#insights').innerHTML=(cmp||'')+
     (top?`<div class="insight">🏆 占用最多的是「${esc(top.c.name)}」<br><b>${fmtHM(top.ms)}</b>，占 ${(top.ms/total*100).toFixed(1)}%</div>`:'')+
-    (sleepM?`<div class="insight">😴 睡眠 <b>${fmtHM(sleepM)}</b><br>平均 ${fmtHM(sleepM/Math.max(1,(e-s)/DAY_MS))} / 天</div>`:'')+
-    `<div class="insight">🎯 优化建议：把「${top?esc(top.c.name):'—'}」中非核心部分标记为低价值类别，下周观察占比是否下降。</div>`;
+    (sleepM?`<div class="insight">😴 睡眠 <b>${fmtHM(sleepM)}</b><br>仅代表已记录睡眠，不用于判断实际睡眠是否充足</div>`:'')+
+    `<div class="insight">🎯 复盘提示：时间分布是否符合你的安排？统计只包含已记录活动，不代表完整一天。</div>`;
 }
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
 
@@ -488,6 +495,7 @@ $('#addCatBtn').onclick=()=>{
 };
 
 /* ================= 悬浮窗（开始 / 结束计时） ================= */
+let timerHandle=null;
 let minimized=false;
 let wMode='timer'; // timer | retro
 function renderWidget(){
@@ -525,8 +533,11 @@ function renderWidget(){
       <div class="wfoot">开始于 ${clock(running.start)}</div>`;
     $('#wStop').onclick=stopEvent;
     tick();
+  }
+}
 function startEvent(name){running={name,start:Date.now()};save();renderWidget();toast('计时开始：'+name)}
 function stopEvent(){
+  clearTimeout(timerHandle);
   const end=Date.now();
   pendingEnd={id:'r'+end,name:running.name,cat:null,start:running.start,end};
   running=null;save();
@@ -538,21 +549,23 @@ function stopEvent(){
     $('#mask').classList.remove('on');
     renderWidget();renderTimeline();
     toast(`已归档：${pendingEnd.name} · ${catOf(pendingEnd.cat).name} · ${fmtHM(pendingEnd.end-pendingEnd.start)}`);
+    pendingEnd=null;
   });
   $('#mask').classList.add('on');
   renderWidget();
 }
 function tick(){
+  clearTimeout(timerHandle);
   if(!running)return;
   const el=Date.now()-running.start,m=Math.floor(el/60000);
   const t=$('#wTime');if(t)t.textContent=pad(Math.floor(m/60))+':'+pad(m%60);
-  setTimeout(tick,1000);
+  timerHandle=setTimeout(tick,1000);
 }
 $('#mask').onclick=e=>{if(e.target.id==='mask'){
   // 取消分类：记为第一个类别，不丢数据
   pendingEnd.cat=state.cats[0].id;state.records.push(pendingEnd);save();
   $('#mask').classList.remove('on');renderTimeline();
-  toast('已按「'+state.cats[0].name+'」归档（可在时间轴查看）');
+  toast('已按「'+state.cats[0].name+'」归档（可在时间轴查看）');pendingEnd=null;
 }};
 $('#wMin').onclick=()=>{minimized=!minimized;$('#wMin').textContent=minimized?'▢':'—';renderWidget()};
 // 拖拽
@@ -569,7 +582,7 @@ $('#wMin').onclick=()=>{minimized=!minimized;$('#wMin').textContent=minimized?'�
 /* ================= 导出 / Obsidian ================= */
 function buildMarkdown(){
   const now=new Date(),ds=dayStart(now);
-  const recs=state.records.filter(r=>r.start<ds+DAY_MS&&r.end>ds).sort((a,b)=>a.start-b.start);
+  const recs=clipRecords(state.records,ds,ds+DAY_MS).sort((a,b)=>a.start-b.start);
   const agg=byCat(recs);const total=Object.values(agg).reduce((a,b)=>a+b,0)||1;
   let md=`# ⏱ ${dstr(now)} 时间日志\n\n> 由「柳比歇夫时间账本」导出\n\n## 类别统计\n\n`;
   Object.entries(agg).sort((a,b)=>b[1]-a[1]).forEach(([id,ms])=>{
@@ -587,11 +600,29 @@ $('#expCopy').onclick=()=>{navigator.clipboard.writeText(buildMarkdown()).then((
 $('#expMd').onclick=()=>download(`时间日志-${dstr(new Date())}.md`,buildMarkdown(),'text/markdown');
 $('#expJson').onclick=()=>{
   const payload={app:'lyubishchev-tracker',version:1,exportedAt:new Date().toISOString(),
-    categories:state.cats,records:state.records.filter(r=>r.start>=dayStart(new Date())-30*DAY_MS)};
+    categories:state.cats,records:state.records};
   download(`时间日志-${dstr(new Date())}.time.json`,JSON.stringify(payload,null,2),'application/json');
 };
-$('#resetDemo').onclick=()=>{if(confirm('确定清空并重新生成演示数据？')){localStorage.removeItem(LS);state=seed();running=null;save();
-  renderTimeline();renderStats();renderCats();renderExport();renderWidget();toast('演示数据已重置')}};
+function refreshAll(){renderTimeline();renderStats();renderCats();renderExport();renderWidget();}
+function showMode(){
+  $('#modeLabel').textContent=demoMode?'演示账本 · 模拟数据，与个人记录分开保存':'个人账本 · 本机保存，请定期导出备份';
+  $('#toggleDemo').textContent=demoMode?'返回个人账本':'查看演示';
+}
+$('#toggleDemo').onclick=()=>{
+  if(pendingEnd)return toast('请先完成分类');
+  if(running)return toast('请先结束当前计时，再切换账本');
+  save();clearTimeout(timerHandle);
+  demoMode=!demoMode;LS=demoMode?REAL_LS+'-demo':REAL_LS;
+  state=load()||(demoMode?seed():emptyState());running=state.running||null;
+  aiMsgs=null;$('#aiOut').textContent='账本已切换，请重新生成复盘。';$('#aiFollowRow').style.display='none';
+  showMode();refreshAll();
+};
+$('#resetDemo').onclick=()=>{
+  if(running||pendingEnd)return toast('请先结束计时并完成分类');
+  if(confirm('清空当前'+(demoMode?'演示':'个人')+'账本的全部记录？此操作不可撤销，请先导出备份。')){
+    state=emptyState();running=null;save();refreshAll();toast('当前账本已清空');
+  }
+};
 
 /* ---- 双向同步：导入 Obsidian 插件写回的 sync.time.json ---- */
 $('#helpBtn').onclick=()=>$('#helpMask').classList.add('on');
@@ -603,6 +634,9 @@ $('#impFile').onchange=e=>{
   rd.onload=()=>{
     try{
       const j=JSON.parse(rd.result);
+      if(!Array.isArray(j.records)||!Array.isArray(j.categories)||!j.categories.length)throw new Error('结构无效');
+      const ids=new Set(j.categories.map(c=>c.id));
+      if(j.categories.some(c=>typeof c.id!=='string'||typeof c.name!=='string'||!/^#[0-9a-f]{6}$/i.test(c.color))||j.records.some(r=>typeof r.id!=='string'||typeof r.name!=='string'||!ids.has(r.cat)||!Number.isFinite(r.start)||!Number.isFinite(r.end)||r.end<=r.start))throw new Error('记录无效');
       const byId={};state.records.forEach(r=>byId[r.id]=r);
       (j.records||[]).forEach(r=>byId[r.id]=r);
       state.records=Object.values(byId).sort((a,b)=>a.start-b.start);
@@ -613,11 +647,6 @@ $('#impFile').onchange=e=>{
   };
   rd.readAsText(f);e.target.value='';
 };
-
-    $('#wStop').onclick=stopEvent;
-    tick();
-  }
-}
 
 /* ================= B. 自然语言补录 ================= */
 let retroDraft=null;
@@ -637,7 +666,7 @@ function parseNatural(raw){
   else if(/早上|上午|今早/.test(t)){force='am';t=t.replace(/早上|上午|今早/g,'')}
   else{t=t.replace('今天','')}
   t=t.replace(/(\d{1,2})\s*[:：点]\s*半/g,'$1:30').replace(/(\d{1,2})\s*[:：点]\s*一刻/g,'$1:15');
-  const base=ds+dayOff*DAY;
+  const base=ds+dayOff*DAY_MS;
   const mk=(h,mm)=>{let H=h;if((force==='pm'||force==='noon')&&H<12)H+=12;if(force==='am'&&H===12)H=0;return base+H*3600000+mm*60000};
   // 抽取时刻
   const times=[];let m,name=t;
@@ -657,10 +686,10 @@ function parseNatural(raw){
   if(times.length>=2){
     start=mk(times[0].h,times[0].mm);end=mk(times[1].h,times[1].mm);
     let guard=0;while(end<=start&&guard++<2)end+=12*3600000;
-    if(end>now+600000)end-=24*3600000; // 解析出未来时间则回退一天
+    // 保留用户明确指定的日期和时段，不单独回退结束时间。
   }else if(durMs){
     if(times.length===1){start=mk(times[0].h,times[0].mm);end=start+durMs}
-    else{end=now;start=end-durMs}
+    else{end=dayOff?base+23*3600000:now;start=end-durMs}
   }else if(times.length===1){
     start=mk(times[0].h,times[0].mm);end=Math.min(now,start+2*3600000);
     if(end<=start)end=start+3600000;
@@ -696,34 +725,31 @@ $('#retroMask').onclick=e=>{if(e.target.id==='retroMask')$('#retroMask').classLi
 /* ================= C. AI 复盘教练 ================= */
 let aiMsgs=null;
 const KEY_LS='lyu-aikey';
+localStorage.removeItem(KEY_LS); // 清除旧版长期保存的密钥，本版只保存在当前页面
 function periodPayload(){
   const [s,e]=periodRange();
-  const recs=state.records.filter(r=>r.start<e&&r.end>s);
+  const recs=clipRecords(state.records,s,e);
   const agg=byCat(recs);const total=Object.values(agg).reduce((a,b)=>a+b,0)||1;
-  const days=Math.max(1,(e-s)/DAY);
+  const days=Math.max(1,Math.ceil((Math.min(e,Date.now())-s)/DAY_MS));
   const items=Object.entries(agg).map(([id,ms])=>({类别:catOf(id).name,时长:fmtHM(ms),占比:+(ms/total*100).toFixed(1)+'%'})).sort((a,b)=>parseFloat(b.占比)-parseFloat(a.占比));
   const evNames=[...new Set(recs.map(r=>r.name))].slice(0,25);
-  return {周期:P.type==='week'?'本周':'本月',范围:dstr(new Date(s))+' ~ '+dstr(new Date(e-DAY)),日均记录:fmtHM(total/days),
+  return {周期:P.type==='week'?'本周':'本月',范围:dstr(new Date(s))+' ~ '+dstr(new Date(e-DAY_MS)),日均记录:fmtHM(total/days),
     类别统计:items,事件样例:evNames};
 }
 function localReviewText(){
   const p=periodPayload();
-  const [s,e]=periodRange();
-  const recs=state.records.filter(r=>r.start<e&&r.end>s);
-  const agg=byCat(recs);const total=Object.values(agg).reduce((a,b)=>a+b,0)||1;
-  const days=Math.max(1,(e-s)/DAY);
-  const deep=agg.deep||0,fun=agg.fun||0,sleep=agg.sleep||0,meet=agg.meet||0;
+  const [s,e]=periodRange(),recs=clipRecords(state.records,s,e);
+  if(!recs.length)return '当前周期没有记录。先记录几件事，再生成复盘。';
+  const agg=byCat(recs),total=Object.values(agg).reduce((a,b)=>a+b,0);
   const top=Object.entries(agg).sort((a,b)=>b[1]-a[1])[0];
-  const L=[`📊 概况：${p.周期}共记录 ${fmtHM(total)}，日均 ${fmtHM(total/days)}。`];
-  L.push(`✨ 亮点：投入最多的是「${top?catOf(top[0]).name:'—'}」（${top?fmtHM(top[1]):'—'}）；深度工作 ${fmtHM(deep)}。`);
-  const holes=[];
-  if(fun/total>0.25)holes.push(`🕳 时间黑洞：娱乐休息占 ${(fun/total*100).toFixed(1)}%（超过 25% 警戒线），建议下周压到 20% 以内`);
-  if(meet/total>0.15)holes.push(`🕳 会议沟通占 ${(meet/total*100).toFixed(1)}%，尝试把部分会议改成异步文字沟通`);
-  if(sleep&&sleep/days<7*3600000)holes.push(`🕳 日均睡眠仅 ${fmtHM(sleep/days)}，长期不足会吃掉白天的效率`);
-  if(deep/total<0.15)holes.push(`🕳 深度工作占比 ${(deep/total*100).toFixed(1)}% 偏低，尝试把最重要的工作固定在每天上午第一段`);
-  L.push(holes.length?holes.join('\n'):'✨ 未发现明显时间黑洞，结构健康，保持！');
-  L.push(`🎯 建议：① 给「娱乐休息」设一个心理上限，超线当天就停；② 每天开工第一件事先记「深度工作」再开电脑；③ 周日用 10 分钟对照本周饼图做下周计划。`);
-  return L.join('\n\n')+'\n\n— 本地规则版复盘 · 填入 Moonshot API Key 可体验完整 AI 教练';
+  return [
+    '📊 已记录概况：'+p.范围+'，共 '+fmtHM(total)+'。',
+    '🔎 时间分布：记录最多的是「'+catOf(top[0]).name+'」，占已记录时长的 '+(top[1]/total*100).toFixed(1)+'%。',
+    '💭 复盘问题：这与你原先的安排一致吗？哪些记录需要补充？哪些投入值得保留？',
+    '🎯 下一步：选择一项你希望调整的活动，写下具体目标，下周再对照记录。',
+    '说明：以上仅反映已记录的时间，不能据此判断整天效率或睡眠是否充足。未记录不代表未发生。',
+    '— 本地规则版复盘，未调用大模型'
+  ].join('\\n\\n');
 }
 async function callKimi(key,msgs){
   const r=await fetch('https://api.moonshot.cn/v1/chat/completions',{method:'POST',
@@ -733,14 +759,14 @@ async function callKimi(key,msgs){
   const j=await r.json();
   return j.choices[0].message.content.trim();
 }
-$('#aiKey').value=localStorage.getItem(KEY_LS)||'';
-$('#aiKey').onchange=e=>{localStorage.setItem(KEY_LS,e.target.value.trim());toast('API Key 已保存到本机')};
+$('#aiKey').value='';
+$('#aiKey').onchange=e=>{aiMsgs=null;toast('密钥仅用于当前页面，关闭后需重新填写')};
 $('#aiGo').onclick=async()=>{
   const key=$('#aiKey').value.trim(),out=$('#aiOut');
   out.textContent='⏳ 正在生成复盘…';
   if(!key){setTimeout(()=>{out.textContent=localReviewText();$('#aiFollowRow').style.display='flex';aiMsgs=null},400);return}
   try{
-    aiMsgs=[{role:'system',content:'你是柳比歇夫式时间管理教练。基于用户的时间统计数据，用中文生成精炼复盘，结构：📊概况 / ✨亮点 / 🕳时间黑洞 / 🎯下周可执行建议。要求具体、坦诚、不空洞，300字以内。'},
+    aiMsgs=[{role:'system',content:'你是柳比歇夫式时间管理教练。基于用户的时间统计数据，用中文生成精炼复盘，结构：📊概况 / ✨亮点 / 🕳时间黑洞 / 🎯下周可执行建议。只描述已记录时间，不把缺失记录当作未发生，不设任意健康阈值。建议需由用户判断，300字以内。'},
       {role:'user',content:'这是我的时间统计数据（JSON）：\n'+JSON.stringify(periodPayload())}];
     const res=await callKimi(key,aiMsgs);
     aiMsgs.push({role:'assistant',content:res});
@@ -766,7 +792,7 @@ $('#aiAsk').onclick=async()=>{
 };
 
 /* ================= 启动 ================= */
-renderTimeline();renderStats();renderCats();renderExport();renderWidget();
+showMode();refreshAll();
 </script>
 </body>
 </html>
